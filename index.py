@@ -27,7 +27,7 @@ def load_json(json_path: Path):
 
 def write_failure(video_id: str, reason: str, failed_logs: Path):
 	with open(failed_logs, "a") as f:
-		f.write(f"{video_id},{reason}")
+		f.write(f"{video_id},{reason}\n")
 
 def download_video(video_id: str, output_dir: Path) -> bool:
 	video_url = get_yt_url(video_id)
@@ -35,32 +35,31 @@ def download_video(video_id: str, output_dir: Path) -> bool:
 	yt = None
 	try:
 		yt = YouTube(video_url)
+
+		# progressive videos contain both audio/video in same file
+		filtered_videos = yt.streams.filter(progressive=True, file_extension="mp4")
 	except:
 		write_failure(video_id, "Video unavailable", failed_logs)
 		return False
-
-	# progressive videos contain both audio/video in same file
-	filtered_videos = yt.streams.filter(progressive=True, file_extension="mp4")
 
 	if len(filtered_videos) <= 0:
 		# add to failed videos log
 		write_failure(video_id, "No viable videos", failed_logs)
 		return False
 
-	download_default = False
 	low_res_videos = filtered_videos.filter(fps="30fps", resolution="480p")
 	if len(low_res_videos) > 0:
 		try:
-			low_res_videos.first().download(output_path=output_dir.as_posix(), filename=video_id, max_retries=5)
+			low_res_videos.first().download(output_path=output_dir.as_posix(), filename=f"{video_id}.mp4", max_retries=5)
+			return True
 		except:
-			download_default = True
+			pass
 	
-	if download_default:
-		try:
-			filtered_videos.first().download(output_path=output_dir.as_posix(), filename=video_id, max_retries=5)
-		except:
-			write_failure(video_id, "Failed to download video", failed_logs)
-			return False
+	try:
+		filtered_videos.first().download(output_path=output_dir.as_posix(), filename=f"{video_id}.mp4", max_retries=5)
+	except:
+		write_failure(video_id, "Failed to download video", failed_logs)
+		return False
 
 	return True
 
@@ -76,7 +75,7 @@ if __name__ == "__main__":
 		failed_logs.touch()
 
 	with open(failed_logs, "r") as f:
-		failed_videos = f.readlines()
+		failed_videos = list(map(lambda line: line.split(",").pop(0), f.readlines()))
 
 	if not training_dir.exists():
 		training_dir.mkdir(parents=True)
@@ -92,27 +91,33 @@ if __name__ == "__main__":
 	training_count = len(training)
 
 	for video in training:
+		i += 1
 		video_id = get_video_id(video)
 		if video_id in downloaded_videos:
+			print(f"Skipping already downloaded video {i}/{training_count}")
 			continue
 
 		# download, if False, update failed_videos
 		if not download_video(video_id, training_dir):
 			failed_videos.append(video_id)
+			print(f"Download failed {i}/{training_count}")
 		else:
-			print(f"Downloaded training video {i + 1}/{training_count}")
+			print(f"Downloaded training video {i}/{training_count}")
 
 	i = 0
 	validation_count = len(validation_1)
 
 	for video in validation_1:
+		i += 1
 		video_id = get_video_id(video)
 		if video_id in downloaded_videos:
+			print(f"Skipping already downloaded video {i}/{validation_count}")
 			continue
 
 		if not download_video(video_id, validation_dir):
 			failed_videos.append(video_id)
+			print(f"Download failed {i}/{validation_count}")
 		else:
-			print(f"Downloaded validation video {i + 1}/{validation_count}")		
-		
+			print(f"Downloaded validation video {i}/{validation_count}")
+
 	print("Finished downloading all videos!")
